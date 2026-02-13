@@ -53,6 +53,10 @@ public partial struct BakeGridSystem : ISystem
             {
                 targetCell = new int2(Mathf.RoundToInt(playerTag.Position.x), Mathf.RoundToInt(playerTag.Position.y));
             }
+            else
+            {
+                Debug.LogError("No player tag found");
+            }
             // Schedule jobs
             var costFieldHandle = new GenerateCostFieldJob{
                 World = collisionWorld, Costs = tempCostFieldBuffer, Width = width, Height = height
@@ -100,7 +104,7 @@ public partial struct BakeGridSystem : ISystem
             
             for (int i = 0; i < costFieldBuffer.Length; i++)
             {
-                if (costFieldBuffer[i] == 255)
+                if (costFieldBuffer[i] == byte.MaxValue)
                 {
                     int x = i % width;
                     int y = i / width;
@@ -253,27 +257,45 @@ public partial struct BakeGridSystem : ISystem
         
         public void Execute(int index)
         {
-            int currentX = index % Width, currentY = index / Width;
-
-            int currentCost = IntegrationField[index];
-            ushort bestCost = (ushort)currentCost;
-            float2 bestDirection = float2.zero;
             
-            for (int i = 0; i < 4; i++)
-            {
-                int2 currentNeighbor = new int2(currentX, currentY) + NeighborOffsets[i];
-                if (currentNeighbor.x < 0 || currentNeighbor.x > Width - 1 || currentNeighbor.y < 0 || currentNeighbor.y > Height - 1)
-                    continue;
+            int currentX = index % Width, currentY = index / Width;
+            
+            // We have to check if we are at the edges of our grid.
+            // If we are given coord we have to flatten it so we check currentX against index - 1 (for left) and index + 1 (for right) neighbors.
+            ushort leftCost = (currentX > 0) ? IntegrationField[index - 1] : ushort.MaxValue;
+            ushort rightCost = (currentX < Width - 1) ? IntegrationField[index + 1] : ushort.MaxValue;
+            ushort downCost = (currentY > 0) ? IntegrationField[index - Width] : ushort.MaxValue;
+            ushort upCost = (currentY < Height - 1) ? IntegrationField[index + Width] : ushort.MaxValue;
 
-                int neighborCell = currentNeighbor.y * Width + currentNeighbor.x;
-                if (IntegrationField[neighborCell] < bestCost)
-                {
-                    bestCost = IntegrationField[neighborCell];
-                    bestDirection = NeighborOffsets[i];
-                }
-            }
+            // Calculate the slope/gradient
+            float xDir = leftCost - rightCost;
+            float yDir = downCost - upCost;
+            
+            float2 direction = new float2(xDir, yDir);
 
-            FlowField[index] = bestDirection;
+            // Since we can get a large vector here, normalize
+            FlowField[index] = math.normalizesafe(direction);
+
+            // This method will always choose the Z axis over the X axis due to the way we check neighbors
+            // Thus we have no gradients, unless an obstacle is in the way
+            // int currentCost = IntegrationField[index];
+            // ushort bestCost = (ushort)currentCost;
+            // float2 bestDirection = float2.zero;
+            // for (int i = 0; i < 4; i++)
+            // {
+            //     int2 currentNeighbor = new int2(currentX, currentY) + NeighborOffsets[i];
+            //     if (currentNeighbor.x < 0 || currentNeighbor.x > Width - 1 || currentNeighbor.y < 0 || currentNeighbor.y > Height - 1)
+            //         continue;
+            //
+            //     int neighborCell = currentNeighbor.y * Width + currentNeighbor.x;
+            //     if (IntegrationField[neighborCell] < bestCost)
+            //     {
+            //         bestCost = IntegrationField[neighborCell];
+            //         bestDirection = NeighborOffsets[i];
+            //     }
+            // }
+
+            // FlowField[index] = bestDirection;
         }
     }
 }

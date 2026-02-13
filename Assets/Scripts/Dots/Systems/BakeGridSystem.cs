@@ -51,7 +51,9 @@ public partial struct BakeGridSystem : ISystem
             int2 targetCell = new int2(width / 2, height / 2); // Default to 0, 0
             if (SystemAPI.TryGetSingleton(out PlayerTag playerTag))
             {
-                targetCell = new int2(Mathf.RoundToInt(playerTag.Position.x), Mathf.RoundToInt(playerTag.Position.y));
+                targetCell = new int2(Mathf.RoundToInt(playerTag.Position.x), Mathf.RoundToInt(playerTag.Position.z));
+                targetCell.x += (width / 2);
+                targetCell.y += (height / 2);
             }
             else
             {
@@ -127,7 +129,7 @@ public partial struct BakeGridSystem : ISystem
                 
                 float3 start = new float3(gridX - (width / 2), 1.0f, (gridY - (height / 2)));
                 
-                Debug.DrawRay(start, new float3(flowField[i].Direction.x, 0,  flowField[i].Direction.y), Color.aquamarine, 30f);
+                Debug.DrawRay(start, new float3(flowField[i].Direction.x, 0,  flowField[i].Direction.y), Color.aquamarine, 3f);
             }
         }
         
@@ -163,11 +165,11 @@ public partial struct BakeGridSystem : ISystem
             
             if(World.OverlapSphere(center, 0.45f, ref hits, collisionFilter, QueryInteraction.Default))
             {
-                if (x - offsetX == -2 && y - offsetY == 0) 
-                {
-                    float3 hitPoint = hits[0].Position;
-                    // Debug.Log($"Query At: {center} | Hit Surface At: {hitPoint} | Distance: {math.distance(center, hitPoint)}");
-                }
+                // if (x - offsetX == -2 && y - offsetY == 0) 
+                // {
+                //     float3 hitPoint = hits[0].Position;
+                //     // Debug.Log($"Query At: {center} | Hit Surface At: {hitPoint} | Distance: {math.distance(center, hitPoint)}");
+                // }
                 Costs[index] = byte.MaxValue;
             }
             else

@@ -3,20 +3,9 @@ using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 
-public struct GridCellDebug : IComponentData
-{
-    
-}
-
 public struct GridCellDebugConfig : IComponentData
 {
     public Entity GridPrefab;
-}
-
-public struct GridCell : IComponentData
-{
-    public float x;
-    public float y;
 }
 
 public struct DistanceFieldComponent : IComponentData
@@ -34,7 +23,6 @@ public struct PlayerTag : IComponentData
     public float3 Position;
 }
 
-// For the tut
 public struct FlowFieldData : IComponentData
 {
     public int2 GridSize;
@@ -59,7 +47,5 @@ public struct IntegrationField : IBufferElementData
 public struct MoveableEntity : IComponentData{}
 
 // Used as an event for the initial bake
-public struct PerformBakeTag : IComponentData
-{
-    
-}
+public struct PerformBakeTag : IComponentData{}
+

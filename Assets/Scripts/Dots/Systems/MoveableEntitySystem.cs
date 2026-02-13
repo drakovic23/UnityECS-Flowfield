@@ -21,14 +21,27 @@ public partial struct MoveableEntitySystem : ISystem
 
         int offsetX = width / 2;
         int offsetY = height / 2;
-        
-        foreach (var (moveableEntity, transform) 
-                 in SystemAPI.Query<RefRO<MoveableEntity>, RefRW<LocalTransform>>())
+        if (!SystemAPI.TryGetSingleton(out PlayerTag playerTag))
         {
-            // Get our position and round
+            Debug.LogError("No player tag");
+            return;
+        }
+
+        foreach (var (moveableEntity, transform, velocity) 
+                 in SystemAPI.Query<RefRO<MoveableEntity>, RefRW<LocalTransform>, RefRW<PhysicsVelocity>>())
+        {
             float3 pos = transform.ValueRO.Position;
+            // float3 playerPos = new float3()
+            float distance = math.lengthsq(pos - playerTag.Position);
+
+            if (distance < 1f)
+            {
+                Debug.LogWarning("Entity reached target");
+                return;
+            }
+            // Get our position and round
             int posX = Mathf.RoundToInt(pos.x) + offsetX;
-            int posY = Mathf.RoundToInt(pos.y) + offsetY;
+            int posY = Mathf.RoundToInt(pos.z) + offsetY;
             
             DynamicBuffer<FlowFieldDirection> flowBuffer = SystemAPI.GetSingletonBuffer<FlowFieldDirection>();
 
@@ -37,9 +50,15 @@ public partial struct MoveableEntitySystem : ISystem
             
             // Convert to world space to array space
             int currentCell = posY * width + posX;
+
+            float3 direction = new float3(flowBuffer[currentCell].Direction.x, velocity.ValueRW.Linear.y, flowBuffer[currentCell].Direction.y);
+            velocity.ValueRW.Linear = new float3(direction.x, velocity.ValueRW.Linear.y, direction.z);
             
-            float3 direction = new float3(flowBuffer[currentCell].Direction.x, 0,  flowBuffer[currentCell].Direction.y);
-            transform.ValueRW.Position += direction * deltaTime;
+            // Apply our direction
+            // float3 direction = new float3(flowBuffer[currentCell].Direction.x, 0,  flowBuffer[currentCell].Direction.y);
+            // transform.ValueRW.Position += direction * deltaTime;
+            Debug.Log($"Move direction: {direction} at {pos}");
+            
         }
     }
 }

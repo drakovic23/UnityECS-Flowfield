@@ -8,10 +8,8 @@ public partial struct MoveableEntitySystem : ISystem
 {
     public void OnUpdate(ref SystemState state)
     {
-        // int gridSize = 0;
         int width = 0;
         int height = 0;
-        float deltaTime = SystemAPI.Time.DeltaTime;
         foreach (var gridConfig in SystemAPI.Query<RefRO<FlowFieldData>>())
         {
             // gridSize = gridConfig.ValueRO.GridSize.x *  gridConfig.ValueRO.GridSize.y;
@@ -50,15 +48,22 @@ public partial struct MoveableEntitySystem : ISystem
             
             // Convert to world space to array space
             int currentCell = posY * width + posX;
-
-            float3 direction = new float3(flowBuffer[currentCell].Direction.x, velocity.ValueRW.Linear.y, flowBuffer[currentCell].Direction.y);
-            velocity.ValueRW.Linear = new float3(direction.x, velocity.ValueRW.Linear.y, direction.z);
             
             // Apply our direction
+            float3 direction = new float3(flowBuffer[currentCell].Direction.x, velocity.ValueRW.Linear.y, flowBuffer[currentCell].Direction.y);
+            velocity.ValueRW.Linear = new float3(direction.x, velocity.ValueRW.Linear.y, direction.z);
             // float3 direction = new float3(flowBuffer[currentCell].Direction.x, 0,  flowBuffer[currentCell].Direction.y);
             // transform.ValueRW.Position += direction * deltaTime;
+            
             Debug.Log($"Move direction: {direction} at {pos}");
             
         }
     }
 }
+
+// --------- Notes ---------
+// Currently, the entity just moves towards the target
+// When using hordes there is typically 3 parts to accomodate large hordes
+// (1) Separation - If a neighbor (ex: left neighbor) is too close to the entity, we need to apply a vector in the opposite direction (right)
+// (2) Alignment - Since the entity is assumed to move in "crowds", it would be optimal to steer towards an average vector of the entire crowd
+// (3) Cohesion - If the entity drifts away from the crowd, we need to move towards the average position of the crowd (center of mass)

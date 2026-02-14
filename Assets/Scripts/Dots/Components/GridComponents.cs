@@ -49,3 +49,7 @@ public struct MoveableEntity : IComponentData{}
 // Used as an event for the initial bake
 public struct PerformBakeTag : IComponentData{}
 
+public struct SpatialMap : IComponentData
+{
+    public NativeParallelMultiHashMap<int, Entity> OccupiedCells;
+}

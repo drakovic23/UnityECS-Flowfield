@@ -8,71 +8,103 @@ using Unity.Transforms;
 using UnityEngine;
 public partial struct MoveableEntitySystem : ISystem
 {
+    NativeParallelMultiHashMap<int, Entity> _spatialMap;
+    EntityQuery _moveablesQuery;
+    FlowFieldData _flowFieldData;
     public void OnCreate(ref SystemState state)
     {
-        state.RequireForUpdate<SpatialMap>();
+        state.RequireForUpdate<FlowFieldData>();
+        _spatialMap = new NativeParallelMultiHashMap<int, Entity>(1000,  Allocator.Persistent);
+        _moveablesQuery = SystemAPI.QueryBuilder().WithAll<MoveableEntity, PhysicsVelocity, LocalTransform>().Build();
+    }
+    public void OnDestroy(ref SystemState state)
+    {
+        _spatialMap.Dispose();
     }
     public void OnUpdate(ref SystemState state)
     {
         int width = 0;
         int height = 0;
-        foreach (var gridConfig in SystemAPI.Query<RefRO<FlowFieldData>>())
-        {
-            // gridSize = gridConfig.ValueRO.GridSize.x *  gridConfig.ValueRO.GridSize.y;
-            width = gridConfig.ValueRO.GridSize.x;
-            height = gridConfig.ValueRO.GridSize.y;
-        }
-
-        int offsetX = width / 2;
-        int offsetY = height / 2;
+        int offsetX = 0;
+        int offsetY = 0;
+        
+        // The player tag is used to stop the entity around the target
         if (!SystemAPI.TryGetSingleton(out PlayerTag playerTag))
         {
             Debug.LogError("No player tag");
             return;
         }
+        
+        if (!SystemAPI.TryGetSingleton(out FlowFieldData flowFieldData))
+        {
+            Debug.LogError("No flow field data");
+            return;
+        }
 
-        var spatialMap = SystemAPI.GetSingleton<SpatialMap>();
-        foreach (var (moveableEntity, transform, velocity, entity) 
+        ComponentLookup<LocalTransform> localTransformLookup = SystemAPI.GetComponentLookup<LocalTransform>(true);
+        var flowFieldDirection = SystemAPI.GetSingletonBuffer<FlowFieldDirection>();
+        width = flowFieldData.GridSize.x;
+        height = flowFieldData.GridSize.y;
+        offsetX = width / 2;
+        offsetY = height / 2;
+        
+        // Clear the map and schedule jobs
+        _spatialMap.Clear();
+
+        var populateSpatialHandle = new PopulateSpatialMapUpdateJob{
+            Height = height,
+            Width = width,
+            SpatialMap = _spatialMap.AsParallelWriter(),
+            offsetX = offsetX,
+            offsetY = offsetY,
+        }.ScheduleParallel(_moveablesQuery, state.Dependency);
+        
+        populateSpatialHandle.Complete();
+        
+        Debug.Log("Populate spatial completed");
+        // This will move the entities
+        var readSpatialHandle = new ReadSpatialMapUpdateJob{
+            Height = height,
+            Width = width,
+            SpatialMap = _spatialMap,
+            TransformLookup = localTransformLookup,
+            SeparationRadius = 0.8f,
+            SeparationWeight = 0.8f,
+            OffsetX = offsetX,
+            OffsetY = offsetY,
+        }.ScheduleParallel(_moveablesQuery, populateSpatialHandle);
+        state.Dependency = readSpatialHandle;
+        readSpatialHandle.Complete();
+        
+        int count = 0;
+        // Handle the actual movement of our entities
+        foreach (var (moveableEntity, transform, velocity, entity)
                  in SystemAPI.Query<RefRO<MoveableEntity>, RefRW<LocalTransform>, RefRW<PhysicsVelocity>>().WithEntityAccess())
         {
-            float3 pos = transform.ValueRO.Position;
-            // float3 playerPos = new float3()
-            float distance = math.lengthsq(pos - playerTag.Position);
-            
-            
-            
-            // Movement logic
-            if (distance < 1f)
-            {
-                Debug.LogWarning("Entity reached target");
-                return;
-            }
-            // Get our position and round
-            int posX = Mathf.RoundToInt(pos.x) + offsetX;
-            int posY = Mathf.RoundToInt(pos.z) + offsetY;
-            
-            DynamicBuffer<FlowFieldDirection> flowBuffer = SystemAPI.GetSingletonBuffer<FlowFieldDirection>();
-
+            // Get the current position of our entity
+            // Read from the spatial map
+            // Move the entity
+        
+            float3 position = transform.ValueRO.Position;
+            int posX = (int)math.round(position.x) + offsetX;
+            int posY = (int)math.round(position.z) + offsetY;
+        
             if (posX < 0 || posX > width - 1 || posY < 0 || posY > height - 1)
                 continue;
             
-            // Convert to world space to array space
-            int currentCell = posY * width + posX;
-            
-            // Apply our direction
-            float3 direction = new float3(flowBuffer[currentCell].Direction.x, velocity.ValueRW.Linear.y, flowBuffer[currentCell].Direction.y);
-            velocity.ValueRW.Linear = new float3(direction.x, velocity.ValueRW.Linear.y, direction.z);
-            // float3 direction = new float3(flowBuffer[currentCell].Direction.x, 0,  flowBuffer[currentCell].Direction.y);
-            // transform.ValueRW.Position += direction * deltaTime;
-            
-            Debug.Log($"Move direction: {direction} at {pos}");
-            
-        }
-    }
+            int cellIndex = posY * width + posX;
+            float2 direction = flowFieldDirection[cellIndex].Direction;
 
+            velocity.ValueRW.Linear = new float3(direction.x, velocity.ValueRO.Linear.y, direction.y);
+            count += 1;
+        }
+
+        Debug.Log(count);
+    }
+    
     public partial struct PopulateSpatialMapUpdateJob : IJobEntity
     {
-        public NativeParallelMultiHashMap<int, Entity>.ParallelWriter MapWriter;
+        public NativeParallelMultiHashMap<int, Entity>.ParallelWriter SpatialMap;
         public int Width;
         public int Height;
         public int offsetX;
@@ -86,13 +118,13 @@ public partial struct MoveableEntitySystem : ISystem
             
             int cellindex = posY * Width + posX;
             
-            MapWriter.Add(cellindex, entity);
+            SpatialMap.Add(cellindex, entity);
         }
     }
     
     public partial struct ReadSpatialMapUpdateJob : IJobEntity
     {
-        public NativeParallelMultiHashMap<int, Entity> SpatialMap;
+        [ReadOnly] public NativeParallelMultiHashMap<int, Entity> SpatialMap;
         [ReadOnly] public ComponentLookup<LocalTransform> TransformLookup;
         public float SeparationRadius;
         public float SeparationWeight;
@@ -134,9 +166,9 @@ public partial struct MoveableEntitySystem : ISystem
                                 continue;
                             
                             float3 neighborPos = TransformLookup[neighbor].Position;
-                            float distance = math.lengthsq(transform.Position - neighborPos);
+                            float distanceSq = math.lengthsq(transform.Position - neighborPos);
                             
-                            if (distance < math.square(SeparationRadius)) // Square the radius so we have equal comparison
+                            if (distanceSq < math.square(SeparationRadius)) // Square the radius so we have equal comparison
                             {
                                 // flatten our current and neighbor positions
                                 float3 horizontalPosCurrent = new float3(transform.Position.x, 0, transform.Position.z);
@@ -155,11 +187,12 @@ public partial struct MoveableEntitySystem : ISystem
                 velocity.Linear += separationForce * SeparationWeight;
 
                 float2 horizontalVelocity = new float2(velocity.Linear.x, velocity.Linear.z);
+                // Are we moving faster than we should?
                 if(math.lengthsq(horizontalVelocity) > math.square(MaxSpeed))
                 {
+                    // Flatten the vectors to keep our vertical gravity
                     float3 horizontalVelocityScaled = math.normalizesafe(new float3(horizontalVelocity.x, 0, horizontalVelocity.y)) * MaxSpeed;
                     float3 newVelocity = new float3(horizontalVelocityScaled.x, velocity.Linear.y, horizontalVelocityScaled.z);
-                    
                     velocity.Linear = newVelocity;
                 }
             }

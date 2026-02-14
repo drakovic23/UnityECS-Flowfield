@@ -7,6 +7,7 @@ using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Transforms;
 using UnityEngine;
+using UnityEngine.UIElements;
 public partial struct MoveableEntitySystem : ISystem
 {
     NativeParallelMultiHashMap<int, Entity> _spatialMap;
@@ -45,6 +46,7 @@ public partial struct MoveableEntitySystem : ISystem
         }
         
         var flowFieldDirection = SystemAPI.GetSingletonBuffer<FlowFieldDirection>();
+        var costField = SystemAPI.GetSingletonBuffer<CostField>();
         width = flowFieldData.GridSize.x;
         height = flowFieldData.GridSize.y;
         offsetX = width / 2;
@@ -74,12 +76,18 @@ public partial struct MoveableEntitySystem : ISystem
             Width = width,
             SpatialMap = _spatialMap,
             FlowFieldDirection = flowFieldDirection.Reinterpret<float2>().AsNativeArray(),
+            CostField = costField.Reinterpret<byte>().AsNativeArray(),
             TransformLookup = localTransformLookup,
             VelocityLookup = velocityLookup,
             SeparationRadius = 0.8f,
             SeparationWeight = 0.8f,
+            AlignmentWeight = 0.1f,
+            CohesionWeight = 1.5f,
+            LookAheadTime = 0.5f,
+            AvoidanceWeight = 0.5f,
             OffsetX = offsetX,
             OffsetY = offsetY,
+            DeltaTime = SystemAPI.Time.DeltaTime,
         }.ScheduleParallel(_moveablesQuery, populateSpatialHandle);
         state.Dependency = readSpatialHandle;
     }
@@ -111,12 +119,18 @@ public partial struct MoveableEntitySystem : ISystem
         [NativeDisableContainerSafetyRestriction] // Since we are performing a lookup and modifying a component of the same type as a ref this tag is needed
         [ReadOnly] public ComponentLookup<PhysicsVelocity> VelocityLookup;
         [ReadOnly] public NativeArray<float2> FlowFieldDirection;
+        [ReadOnly] public NativeArray<byte> CostField;
         public float SeparationRadius;
         public float SeparationWeight;
+        public float AlignmentWeight;
+        public float CohesionWeight;
+        public float LookAheadTime; // How far do we look ahead in time for obstacles
+        public float AvoidanceWeight; // How much weight do we apply to avoiding obstacles
         public int Width;
         public int Height;
         public int OffsetX;
         public int OffsetY;
+        public float DeltaTime;
         public void Execute(Entity entity, ref PhysicsVelocity velocity, in LocalTransform transform)
         {
             int posX = (int)math.round(transform.Position.x) + OffsetX;
@@ -128,6 +142,7 @@ public partial struct MoveableEntitySystem : ISystem
             
             float3 separationForce = float3.zero;
             float3 averageVelocity = float3.zero;
+            float3 averagePosition = float3.zero;
             int neighborCount = 0;
             // Check 3 x 3 neighbors for distance and average velocity
             for (int x = -1; x <= 1; x++)
@@ -166,30 +181,60 @@ public partial struct MoveableEntitySystem : ISystem
                                 // For our average velocity
                                 neighborCount += 1;
                                 averageVelocity += VelocityLookup[neighbor].Linear;
+                                
+                                // Average position for cohesion
+                                averagePosition += neighborPos;
                             }
                         } while (SpatialMap.TryGetNextValue(out neighbor, ref iterator));
                     }
                 }
             }
 
-            if (neighborCount > 1)
+            if (neighborCount > 0)
+            {
                 averageVelocity /= neighborCount;
+                averagePosition /= neighborCount;
+            }
             
             // Movement logic
             float MaxSpeed = 1f;
+            float TurnSpeed = 2f;
+            
+            // Find our future position and apply a force away from any obstacles
+            float3 futurePosition = transform.Position + (velocity.Linear * LookAheadTime);
+            float3 avoidanceForce = float3.zero;
+            int futureX = Mathf.RoundToInt(futurePosition.x) + OffsetX;
+            int futureY = Mathf.RoundToInt(futurePosition.z) + OffsetY;
+            if (futureX >= 0 && futureX < Width && futureY >= 0 && futureY < Height)
+            {
+                int futureCellIndex =  futureY * Width + futureX;
 
+                float3 futureToCurrent = transform.Position - futurePosition;
+                
+                bool isFutureCellWalkable = CostField[futureCellIndex] != byte.MaxValue;
+                if (!isFutureCellWalkable)
+                {
+                    avoidanceForce = math.normalizesafe(futureToCurrent);
+                }
+            }
+            
+            float3 alignmentDirection = math.normalizesafe(new float3(averageVelocity.x, 0, averageVelocity.z));
+            float3 centerOfMass =  math.normalizesafe(new float3(averagePosition.x, 0, averagePosition.z) - transform.Position);
             float3 flowFieldDirection = new float3(FlowFieldDirection[currentCell].x, 0 , FlowFieldDirection[currentCell].y);
-            float3 targetDirection = math.normalizesafe(flowFieldDirection + (separationForce * SeparationWeight) + averageVelocity);
+            float3 targetDirection = math.normalizesafe(flowFieldDirection + (separationForce * SeparationWeight) + 
+                                                        (alignmentDirection *  AlignmentWeight) + (centerOfMass * CohesionWeight) + (avoidanceForce * AvoidanceWeight));
+            
+            
             targetDirection *= MaxSpeed;
-            velocity.Linear = new float3(targetDirection.x, velocity.Linear.y, targetDirection.z);
-
+            // velocity.Linear = new float3(targetDirection.x, velocity.Linear.y, targetDirection.z);
+            velocity.Linear = math.lerp(velocity.Linear, new float3(targetDirection.x, velocity.Linear.y, targetDirection.z), TurnSpeed * DeltaTime);
             // Are we moving faster than we should?
             if(math.lengthsq(targetDirection) > math.square(MaxSpeed))
             {
                 // Flatten the vectors to keep our vertical gravity
                 float3 horizontalVelocityScaled = math.normalizesafe(new float3(targetDirection.x, 0, targetDirection.y)) * MaxSpeed;
                 float3 newVelocity = new float3(horizontalVelocityScaled.x, velocity.Linear.y, horizontalVelocityScaled.z);
-                velocity.Linear = newVelocity;
+                velocity.Linear = velocity.Linear = math.lerp(velocity.Linear, newVelocity, TurnSpeed * DeltaTime);
             }
         }
     }
@@ -205,12 +250,9 @@ public partial struct MoveableEntitySystem : ISystem
 }
 
 /*  --------------------Notes---------------------
-    Currently, the entity just moves towards the target
     When using hordes there is typically 3 parts to accomodate large hordes
     (1) Separation - If a neighbor (ex: left neighbor) is too close to the entity, we need to apply a vector in the opposite direction (right)
     (2) Alignment - Since the entity is assumed to move in "crowds", it would be optimal to steer towards an average vector of the entire crowd
     (3) Cohesion - If the entity drifts away from the crowd, we need to move towards the average position of the crowd (center of mass)
-    The flow field acts as alignment (entities are pulled together toward the target) and as alignment (the entities are forced to face the same direction)
-    As a result we can use flow field + separation to achieve similar results since the separation and alignment are redundant math
     ----------------------------------------------
 */

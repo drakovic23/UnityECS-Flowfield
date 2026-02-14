@@ -113,7 +113,6 @@ public partial struct BakeGridSystem : ISystem
                     int offsetX = width / 2;
                     int offsetY = width / 2;
                     
-                    Debug.Log("Found a wall, drawing line");
                     Debug.DrawLine(new Vector3(x - offsetX, 10, y - offsetY), new Vector3(x - offsetX, 0, y - offsetY), Color.red, 30f);
                 }
             }

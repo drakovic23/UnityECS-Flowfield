@@ -11,29 +11,18 @@ public partial struct CreateGridSystem : ISystem
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<EndSimulationEntityCommandBufferSystem.Singleton>();
-        _hasCooked = false;
     }
     
-    const int WIDTH = 40;
-    const int HEIGHT = 40;
-    bool _hasCooked;
+    const int WIDTH = 100;
+    const int HEIGHT = 100;
     public void OnUpdate(ref SystemState state)
     {
-        int count = 0;
-        int cellCount = 0;
-        
         var ecbSingleton = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>();
         var ecb = ecbSingleton.CreateCommandBuffer(state.WorldUnmanaged);
         quaternion rotation = quaternion.Euler(math.radians(90), 0,0);
         
         foreach (var (gridDebugConfig, tag, entity) in SystemAPI.Query<RefRO<GridCellDebugConfig>, RefRO<DebugGridTag>>().WithEntityAccess())
         {
-            if(count > 1)
-            {
-                Debug.LogError("Count > 1");
-                return;
-            }
-            
             int offsetX = WIDTH / 2;
             int offsetY = HEIGHT / 2;
             for (int x = 0; x < WIDTH; x++)
@@ -45,19 +34,11 @@ public partial struct CreateGridSystem : ISystem
                     int posX = x - offsetX;
                     int posY = y - offsetY;
                     ecb.SetComponent(newCell, LocalTransform.FromPositionRotation(new float3(posX, 0.1f, posY), rotation));
-                    cellCount += 1;
                 }
             }
             
             // Remove the tag so we don't do this multiple times
             ecb.RemoveComponent<DebugGridTag>(entity);
-            count += 1;
-        }
-        
-        if(!_hasCooked)
-        {
-            Debug.Log("Created " + cellCount + " grid cells");
-            _hasCooked = true;
         }
     }
 }

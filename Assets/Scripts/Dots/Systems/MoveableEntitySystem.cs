@@ -49,7 +49,11 @@ public partial struct MoveableEntitySystem : ISystem
         offsetY = height / 2;
         
         // Clear the map and schedule jobs
-        _spatialMap.Clear();
+        // It's possible that the other threads haven't yet completed
+        // So we wait for any dependencies
+        var clearSpatialHandle = new ClearSpatialMap{
+            SpatialMap =  _spatialMap,
+        }.Schedule(state.Dependency);
 
         var populateSpatialHandle = new PopulateSpatialMapUpdateJob{
             Height = height,
@@ -57,16 +61,16 @@ public partial struct MoveableEntitySystem : ISystem
             SpatialMap = _spatialMap.AsParallelWriter(),
             offsetX = offsetX,
             offsetY = offsetY,
-        }.ScheduleParallel(_moveablesQuery, state.Dependency);
+        }.ScheduleParallel(_moveablesQuery, clearSpatialHandle);
         
-        populateSpatialHandle.Complete();
         
-        Debug.Log("Populate spatial completed");
+        // Debug.Log("Populate spatial completed");
         // This will move the entities
         var readSpatialHandle = new ReadSpatialMapUpdateJob{
             Height = height,
             Width = width,
             SpatialMap = _spatialMap,
+            FlowFieldDirection = flowFieldDirection.Reinterpret<float2>().AsNativeArray(),
             TransformLookup = localTransformLookup,
             SeparationRadius = 0.8f,
             SeparationWeight = 0.8f,
@@ -74,32 +78,6 @@ public partial struct MoveableEntitySystem : ISystem
             OffsetY = offsetY,
         }.ScheduleParallel(_moveablesQuery, populateSpatialHandle);
         state.Dependency = readSpatialHandle;
-        readSpatialHandle.Complete();
-        
-        int count = 0;
-        // Handle the actual movement of our entities
-        foreach (var (moveableEntity, transform, velocity, entity)
-                 in SystemAPI.Query<RefRO<MoveableEntity>, RefRW<LocalTransform>, RefRW<PhysicsVelocity>>().WithEntityAccess())
-        {
-            // Get the current position of our entity
-            // Read from the spatial map
-            // Move the entity
-        
-            float3 position = transform.ValueRO.Position;
-            int posX = (int)math.round(position.x) + offsetX;
-            int posY = (int)math.round(position.z) + offsetY;
-        
-            if (posX < 0 || posX > width - 1 || posY < 0 || posY > height - 1)
-                continue;
-            
-            int cellIndex = posY * width + posX;
-            float2 direction = flowFieldDirection[cellIndex].Direction;
-
-            velocity.ValueRW.Linear = new float3(direction.x, velocity.ValueRO.Linear.y, direction.y);
-            count += 1;
-        }
-
-        Debug.Log(count);
     }
     
     public partial struct PopulateSpatialMapUpdateJob : IJobEntity
@@ -126,6 +104,7 @@ public partial struct MoveableEntitySystem : ISystem
     {
         [ReadOnly] public NativeParallelMultiHashMap<int, Entity> SpatialMap;
         [ReadOnly] public ComponentLookup<LocalTransform> TransformLookup;
+        [ReadOnly] public NativeArray<float2> FlowFieldDirection;
         public float SeparationRadius;
         public float SeparationWeight;
         public int Width;
@@ -139,6 +118,7 @@ public partial struct MoveableEntitySystem : ISystem
             if (posX < 0 || posX > Width - 1 || posY < 0 || posY > Height - 1)
                 return;
             
+            int currentCell = posY * Width + posX;
             float3 separationForce = float3.zero;
             
             // Check 3 x 3 neighbors
@@ -181,21 +161,33 @@ public partial struct MoveableEntitySystem : ISystem
             }
             
             // Apply the force
-            float MaxSpeed = 5f;
-            if (!math.all(separationForce == 0))
-            {
-                velocity.Linear += separationForce * SeparationWeight;
+            float MaxSpeed = 1f;
+            // If an entity is not alone
+            // if (!math.all(separationForce == 0))
+            // {
+            float3 flowFieldDirection = new float3(FlowFieldDirection[currentCell].x, 0 , FlowFieldDirection[currentCell].y);
+            float3 targetDirection = math.normalizesafe(flowFieldDirection + (separationForce * SeparationWeight));
+            targetDirection *= MaxSpeed;
+            velocity.Linear = new float3(targetDirection.x, velocity.Linear.y, targetDirection.z);
 
-                float2 horizontalVelocity = new float2(velocity.Linear.x, velocity.Linear.z);
-                // Are we moving faster than we should?
-                if(math.lengthsq(horizontalVelocity) > math.square(MaxSpeed))
-                {
-                    // Flatten the vectors to keep our vertical gravity
-                    float3 horizontalVelocityScaled = math.normalizesafe(new float3(horizontalVelocity.x, 0, horizontalVelocity.y)) * MaxSpeed;
-                    float3 newVelocity = new float3(horizontalVelocityScaled.x, velocity.Linear.y, horizontalVelocityScaled.z);
-                    velocity.Linear = newVelocity;
-                }
+            // Are we moving faster than we should?
+            if(math.lengthsq(targetDirection) > math.square(MaxSpeed))
+            {
+                // Flatten the vectors to keep our vertical gravity
+                float3 horizontalVelocityScaled = math.normalizesafe(new float3(targetDirection.x, 0, targetDirection.y)) * MaxSpeed;
+                float3 newVelocity = new float3(horizontalVelocityScaled.x, velocity.Linear.y, horizontalVelocityScaled.z);
+                velocity.Linear = newVelocity;
             }
+            // }
+        }
+    }
+
+    public struct ClearSpatialMap : IJob
+    {
+        public NativeParallelMultiHashMap<int, Entity> SpatialMap;
+        public void Execute()
+        {
+            SpatialMap.Clear();
         }
     }
 }

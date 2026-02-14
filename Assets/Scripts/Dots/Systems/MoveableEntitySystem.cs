@@ -1,5 +1,6 @@
 ﻿
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -10,12 +11,14 @@ public partial struct MoveableEntitySystem : ISystem
 {
     NativeParallelMultiHashMap<int, Entity> _spatialMap;
     EntityQuery _moveablesQuery;
+    EntityQuery _moveablesQueryNoVelocity;
     FlowFieldData _flowFieldData;
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<FlowFieldData>();
         _spatialMap = new NativeParallelMultiHashMap<int, Entity>(1000,  Allocator.Persistent);
         _moveablesQuery = SystemAPI.QueryBuilder().WithAll<MoveableEntity, PhysicsVelocity, LocalTransform>().Build();
+        _moveablesQueryNoVelocity = SystemAPI.QueryBuilder().WithAll<MoveableEntity, LocalTransform>().Build();
     }
     public void OnDestroy(ref SystemState state)
     {
@@ -28,7 +31,7 @@ public partial struct MoveableEntitySystem : ISystem
         int offsetX = 0;
         int offsetY = 0;
         
-        // The player tag is used to stop the entity around the target
+        // Used to stop the entity around the target
         if (!SystemAPI.TryGetSingleton(out PlayerTag playerTag))
         {
             Debug.LogError("No player tag");
@@ -40,8 +43,7 @@ public partial struct MoveableEntitySystem : ISystem
             Debug.LogError("No flow field data");
             return;
         }
-
-        ComponentLookup<LocalTransform> localTransformLookup = SystemAPI.GetComponentLookup<LocalTransform>(true);
+        
         var flowFieldDirection = SystemAPI.GetSingletonBuffer<FlowFieldDirection>();
         width = flowFieldData.GridSize.x;
         height = flowFieldData.GridSize.y;
@@ -59,19 +61,21 @@ public partial struct MoveableEntitySystem : ISystem
             Height = height,
             Width = width,
             SpatialMap = _spatialMap.AsParallelWriter(),
-            offsetX = offsetX,
-            offsetY = offsetY,
-        }.ScheduleParallel(_moveablesQuery, clearSpatialHandle);
+            OffsetX = offsetX,
+            OffsetY = offsetY,
+        }.ScheduleParallel(_moveablesQueryNoVelocity, clearSpatialHandle);
+        populateSpatialHandle.Complete();
         
-        
-        // Debug.Log("Populate spatial completed");
         // This will move the entities
+        ComponentLookup<LocalTransform> localTransformLookup = SystemAPI.GetComponentLookup<LocalTransform>(true);
+        ComponentLookup<PhysicsVelocity> velocityLookup = SystemAPI.GetComponentLookup<PhysicsVelocity>(true);
         var readSpatialHandle = new ReadSpatialMapUpdateJob{
             Height = height,
             Width = width,
             SpatialMap = _spatialMap,
             FlowFieldDirection = flowFieldDirection.Reinterpret<float2>().AsNativeArray(),
             TransformLookup = localTransformLookup,
+            VelocityLookup = velocityLookup,
             SeparationRadius = 0.8f,
             SeparationWeight = 0.8f,
             OffsetX = offsetX,
@@ -85,12 +89,12 @@ public partial struct MoveableEntitySystem : ISystem
         public NativeParallelMultiHashMap<int, Entity>.ParallelWriter SpatialMap;
         public int Width;
         public int Height;
-        public int offsetX;
-        public int offsetY;
+        public int OffsetX;
+        public int OffsetY;
         public void Execute(Entity entity, in LocalTransform transform)
         {
-            int posX = (int)math.round(transform.Position.x) + offsetX;
-            int posY = (int)math.round(transform.Position.z) + offsetY;
+            int posX = (int)math.round(transform.Position.x) + OffsetX;
+            int posY = (int)math.round(transform.Position.z) + OffsetY;
             if (posX < 0 || posX > Width - 1 || posY < 0 || posY > Height - 1)
                 return;
             
@@ -104,6 +108,8 @@ public partial struct MoveableEntitySystem : ISystem
     {
         [ReadOnly] public NativeParallelMultiHashMap<int, Entity> SpatialMap;
         [ReadOnly] public ComponentLookup<LocalTransform> TransformLookup;
+        [NativeDisableContainerSafetyRestriction] // Since we are performing a lookup and modifying a component of the same type as a ref this tag is needed
+        [ReadOnly] public ComponentLookup<PhysicsVelocity> VelocityLookup;
         [ReadOnly] public NativeArray<float2> FlowFieldDirection;
         public float SeparationRadius;
         public float SeparationWeight;
@@ -119,9 +125,11 @@ public partial struct MoveableEntitySystem : ISystem
                 return;
             
             int currentCell = posY * Width + posX;
-            float3 separationForce = float3.zero;
             
-            // Check 3 x 3 neighbors
+            float3 separationForce = float3.zero;
+            float3 averageVelocity = float3.zero;
+            int neighborCount = 0;
+            // Check 3 x 3 neighbors for distance and average velocity
             for (int x = -1; x <= 1; x++)
             {
                 for (int y = -1; y <= 1; y++)
@@ -154,19 +162,24 @@ public partial struct MoveableEntitySystem : ISystem
                                 float3 horizontalPosCurrent = new float3(transform.Position.x, 0, transform.Position.z);
                                 float3 horizontalPosNeighbor = new float3(neighborPos.x, 0, neighborPos.z);
                                 separationForce += math.normalizesafe(horizontalPosCurrent - horizontalPosNeighbor);
+                                
+                                // For our average velocity
+                                neighborCount += 1;
+                                averageVelocity += VelocityLookup[neighbor].Linear;
                             }
                         } while (SpatialMap.TryGetNextValue(out neighbor, ref iterator));
                     }
                 }
             }
+
+            if (neighborCount > 1)
+                averageVelocity /= neighborCount;
             
-            // Apply the force
+            // Movement logic
             float MaxSpeed = 1f;
-            // If an entity is not alone
-            // if (!math.all(separationForce == 0))
-            // {
+
             float3 flowFieldDirection = new float3(FlowFieldDirection[currentCell].x, 0 , FlowFieldDirection[currentCell].y);
-            float3 targetDirection = math.normalizesafe(flowFieldDirection + (separationForce * SeparationWeight));
+            float3 targetDirection = math.normalizesafe(flowFieldDirection + (separationForce * SeparationWeight) + averageVelocity);
             targetDirection *= MaxSpeed;
             velocity.Linear = new float3(targetDirection.x, velocity.Linear.y, targetDirection.z);
 
@@ -178,7 +191,6 @@ public partial struct MoveableEntitySystem : ISystem
                 float3 newVelocity = new float3(horizontalVelocityScaled.x, velocity.Linear.y, horizontalVelocityScaled.z);
                 velocity.Linear = newVelocity;
             }
-            // }
         }
     }
 

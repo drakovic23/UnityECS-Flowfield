@@ -1,4 +1,5 @@
 ﻿
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
@@ -8,12 +9,14 @@ using Unity.Physics;
 using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.UIElements;
+[BurstCompile]
 public partial struct MoveableEntitySystem : ISystem
 {
     NativeParallelMultiHashMap<int, Entity> _spatialMap;
     EntityQuery _moveablesQuery;
     EntityQuery _moveablesQueryNoVelocity;
     FlowFieldData _flowFieldData;
+    [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<FlowFieldData>();
@@ -21,10 +24,12 @@ public partial struct MoveableEntitySystem : ISystem
         _moveablesQuery = SystemAPI.QueryBuilder().WithAll<MoveableEntity, PhysicsVelocity, LocalTransform>().Build();
         _moveablesQueryNoVelocity = SystemAPI.QueryBuilder().WithAll<MoveableEntity, LocalTransform>().Build();
     }
+    [BurstCompile]
     public void OnDestroy(ref SystemState state)
     {
         _spatialMap.Dispose();
     }
+    [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
         int width = 0;
@@ -35,13 +40,13 @@ public partial struct MoveableEntitySystem : ISystem
         // Used to stop the entity around the target
         if (!SystemAPI.TryGetSingleton(out PlayerTag playerTag))
         {
-            Debug.LogError("No player tag");
+            // Debug.LogError("No player tag");
             return;
         }
         
         if (!SystemAPI.TryGetSingleton(out FlowFieldData flowFieldData))
         {
-            Debug.LogError("No flow field data");
+            // Debug.LogError("No flow field data");
             return;
         }
         
@@ -81,8 +86,8 @@ public partial struct MoveableEntitySystem : ISystem
             VelocityLookup = velocityLookup,
             SeparationRadius = 0.8f,
             SeparationWeight = 0.8f,
-            AlignmentWeight = 0.1f,
-            CohesionWeight = 1.5f,
+            AlignmentWeight = 0.25f,
+            CohesionWeight = 0.8f,
             LookAheadTime = 0.5f,
             AvoidanceWeight = 0.5f,
             OffsetX = offsetX,
@@ -91,7 +96,7 @@ public partial struct MoveableEntitySystem : ISystem
         }.ScheduleParallel(_moveablesQuery, populateSpatialHandle);
         state.Dependency = readSpatialHandle;
     }
-    
+    [BurstCompile]
     public partial struct PopulateSpatialMapUpdateJob : IJobEntity
     {
         public NativeParallelMultiHashMap<int, Entity>.ParallelWriter SpatialMap;
@@ -111,7 +116,7 @@ public partial struct MoveableEntitySystem : ISystem
             SpatialMap.Add(cellindex, entity);
         }
     }
-    
+    [BurstCompile]
     public partial struct ReadSpatialMapUpdateJob : IJobEntity
     {
         [ReadOnly] public NativeParallelMultiHashMap<int, Entity> SpatialMap;
@@ -203,8 +208,8 @@ public partial struct MoveableEntitySystem : ISystem
             // Find our future position and apply a force away from any obstacles
             float3 futurePosition = transform.Position + (velocity.Linear * LookAheadTime);
             float3 avoidanceForce = float3.zero;
-            int futureX = Mathf.RoundToInt(futurePosition.x) + OffsetX;
-            int futureY = Mathf.RoundToInt(futurePosition.z) + OffsetY;
+            int futureX = (int) (math.round(futurePosition.x) + OffsetX);
+            int futureY = (int) (math.round(futurePosition.z) + OffsetY);
             if (futureX >= 0 && futureX < Width && futureY >= 0 && futureY < Height)
             {
                 int futureCellIndex =  futureY * Width + futureX;
@@ -238,7 +243,7 @@ public partial struct MoveableEntitySystem : ISystem
             }
         }
     }
-
+    [BurstCompile]
     public struct ClearSpatialMap : IJob
     {
         public NativeParallelMultiHashMap<int, Entity> SpatialMap;

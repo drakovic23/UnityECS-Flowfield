@@ -208,8 +208,8 @@ public partial struct MoveableEntitySystem : ISystem
             // Find our future position and apply a force away from any obstacles
             float3 futurePosition = transform.Position + (velocity.Linear * LookAheadTime);
             float3 avoidanceForce = float3.zero;
-            int futureX = (int) (math.round(futurePosition.x) + OffsetX);
-            int futureY = (int) (math.round(futurePosition.z) + OffsetY);
+            int futureX = (int)math.round(futurePosition.x) + OffsetX;
+            int futureY = (int)math.round(futurePosition.z) + OffsetY;
             if (futureX >= 0 && futureX < Width && futureY >= 0 && futureY < Height)
             {
                 int futureCellIndex =  futureY * Width + futureX;

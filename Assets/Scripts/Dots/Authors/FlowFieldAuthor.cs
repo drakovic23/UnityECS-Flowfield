@@ -29,6 +29,9 @@ public class FlowFieldAuthor : MonoBehaviour
             var integrationBuffer = AddBuffer<IntegrationField>(entity);
             integrationBuffer.Resize(gridSize, NativeArrayOptions.ClearMemory);
             
+            var obstacleCountBuffer = AddBuffer<ObstacleCountMap>(entity);
+            obstacleCountBuffer.Resize(gridSize, NativeArrayOptions.ClearMemory);
+            
             // For the initial bake
             AddComponent(entity, new PerformBakeTag());
         }

@@ -39,6 +39,7 @@ public partial struct BakeGridSystem : ISystem
             
             // Allocate a temporary buffer for the cost field and integration field
             NativeArray<byte> tempCostFieldBuffer = new NativeArray<byte>(gridSize, Allocator.TempJob);
+            NativeArray<byte> tempObstacleBuffer = new NativeArray<byte>(gridSize, Allocator.TempJob);
             NativeArray<ushort> tempIntegrationBuffer = new NativeArray<ushort>(gridSize, Allocator.TempJob);
             NativeArray<float2> tempFlowFieldBuffer = new NativeArray<float2>(gridSize, Allocator.TempJob);
             
@@ -61,7 +62,7 @@ public partial struct BakeGridSystem : ISystem
             }
             // Schedule jobs
             var costFieldHandle = new GenerateCostFieldJob{
-                World = collisionWorld, Costs = tempCostFieldBuffer, Width = width, Height = height
+                World = collisionWorld, CostField = tempCostFieldBuffer, ObstacleCountMap = tempObstacleBuffer, Width = width, Height = height
             }.Schedule(gridSize, 20, state.Dependency);
             var integrationFieldHandle = new GenerateIntegrationField{
                 CostField = tempCostFieldBuffer, // Using the temp buffer here is faster since .AsNativeArray() returns a pointer
@@ -81,6 +82,7 @@ public partial struct BakeGridSystem : ISystem
             
             // Copy our temp buffer into their respective fields
             DynamicBuffer<byte> costFieldBuffer = SystemAPI.GetSingletonBuffer<CostField>().Reinterpret<byte>();
+            DynamicBuffer<byte> obstacleMapBuffer = SystemAPI.GetSingletonBuffer<ObstacleCountMap>().Reinterpret<byte>();
             DynamicBuffer<ushort> integrationFieldBuffer = SystemAPI.GetSingletonBuffer<IntegrationField>().Reinterpret<ushort>();
             DynamicBuffer<FlowFieldDirection> flowField = SystemAPI.GetSingletonBuffer<FlowFieldDirection>(); // remove this later
             DynamicBuffer<float2> flowFieldBuffer = SystemAPI.GetSingletonBuffer<FlowFieldDirection>().Reinterpret<float2>();
@@ -89,12 +91,14 @@ public partial struct BakeGridSystem : ISystem
             costFieldBuffer.CopyFrom(tempCostFieldBuffer);
             integrationFieldBuffer.CopyFrom(tempIntegrationBuffer);
             flowFieldBuffer.CopyFrom(tempFlowFieldBuffer);
+            obstacleMapBuffer.CopyFrom(tempObstacleBuffer);
             
             // Cleanup
             tempIntegrationBuffer.Dispose();
             tempCostFieldBuffer.Dispose();
             tempFlowFieldBuffer.Dispose();
             neighborOffsets.Dispose();
+            tempObstacleBuffer.Dispose();
             
             // Remove the tag so we bake only once for now
             var ecbSingleton = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>();
@@ -131,12 +135,12 @@ public partial struct BakeGridSystem : ISystem
                 Debug.DrawRay(start, new float3(flowField[i].Direction.x, 0,  flowField[i].Direction.y), Color.aquamarine, 3f);
             }
         }
-        
     }
     public struct GenerateCostFieldJob : IJobParallelFor
     {
         [ReadOnly] public CollisionWorld World;
-        [WriteOnly] public NativeArray<byte> Costs;
+        [WriteOnly] public NativeArray<byte> CostField;
+        [WriteOnly] public NativeArray<byte> ObstacleCountMap;
         public int Width;
         public int Height;
         public void Execute(int index)
@@ -151,7 +155,6 @@ public partial struct BakeGridSystem : ISystem
             
             // Get the center position of the cell
             // float3 center = new float3(x + 0.5f, 0, y + 0.5f);
-            //Query At: float3(-2f, 0.1f, 0f) | Hit Surface At: float3(0f, 0f, 0f) | Distance: 2.002498
             int offsetX = Width / 2;
             int offsetY = Height / 2;
             float3 center = new float3(x - offsetX, 0.1f, y - offsetY);
@@ -169,11 +172,12 @@ public partial struct BakeGridSystem : ISystem
                 //     float3 hitPoint = hits[0].Position;
                 //     // Debug.Log($"Query At: {center} | Hit Surface At: {hitPoint} | Distance: {math.distance(center, hitPoint)}");
                 // }
-                Costs[index] = byte.MaxValue;
+                CostField[index] = byte.MaxValue;
+                ObstacleCountMap[index] = (byte) hits.Length;
             }
             else
             {
-                Costs[index] = 1;
+                CostField[index] = 1;
             }
 
             hits.Dispose();

@@ -12,6 +12,11 @@ public partial struct BakeGridSystem : ISystem
         state.RequireForUpdate<EndSimulationEntityCommandBufferSystem.Singleton>();
         state.RequireForUpdate<SimulationSingleton>();
         state.RequireForUpdate<PhysicsWorldSingleton>();
+        
+        // state.RequireForUpdate<CostField>();
+        // state.RequireForUpdate<ObstacleCountMap>();
+        // state.RequireForUpdate<IntegrationField>();
+        // state.RequireForUpdate<FlowFieldDirection>();
     }
     const int LAYER_OBSTACLE = 7;
 
@@ -31,17 +36,30 @@ public partial struct BakeGridSystem : ISystem
         if (gridSize == 0) // error
             return;
         
+        var physicsWorld = SystemAPI.GetSingleton<PhysicsWorldSingleton>();
+        CollisionWorld collisionWorld = physicsWorld.CollisionWorld;
+        
         // Let's assume we only bake when a bake tag exists
         foreach (var (tag, entity) in SystemAPI.Query<RefRO<PerformBakeTag>>().WithEntityAccess())
         {
-            var physicsWorld = SystemAPI.GetSingleton<PhysicsWorldSingleton>();
-            CollisionWorld collisionWorld = physicsWorld.CollisionWorld;
+
             
-            // Allocate a temporary buffer for the cost field and integration field
-            NativeArray<byte> tempCostFieldBuffer = new NativeArray<byte>(gridSize, Allocator.TempJob);
-            NativeArray<byte> tempObstacleBuffer = new NativeArray<byte>(gridSize, Allocator.TempJob);
-            NativeArray<ushort> tempIntegrationBuffer = new NativeArray<ushort>(gridSize, Allocator.TempJob);
-            NativeArray<float2> tempFlowFieldBuffer = new NativeArray<float2>(gridSize, Allocator.TempJob);
+            DynamicBuffer<byte> costFieldBuffer = SystemAPI.GetSingletonBuffer<CostField>().Reinterpret<byte>();
+            DynamicBuffer<byte> obstacleCountBuffer = SystemAPI.GetSingletonBuffer<ObstacleCountMap>().Reinterpret<byte>();
+            DynamicBuffer<ushort> integrationFieldBuffer = SystemAPI.GetSingletonBuffer<IntegrationField>().Reinterpret<ushort>();
+            DynamicBuffer<float2> flowFieldBuffer = SystemAPI.GetSingletonBuffer<FlowFieldDirection>().Reinterpret<float2>();
+
+            costFieldBuffer.ResizeUninitialized(gridSize);
+            obstacleCountBuffer.ResizeUninitialized(gridSize);
+            integrationFieldBuffer.ResizeUninitialized(gridSize);
+            flowFieldBuffer.ResizeUninitialized(gridSize);
+            
+            // Cache the pointers
+            NativeArray<byte> costFieldArr = costFieldBuffer.AsNativeArray();
+            NativeArray<byte> obstacleCountArr = obstacleCountBuffer.AsNativeArray();
+            NativeArray<ushort> integrationFieldArr = integrationFieldBuffer.AsNativeArray();
+            NativeArray<float2> flowFieldArr = flowFieldBuffer.AsNativeArray();
+            
             
             NativeArray<int2> neighborOffsets = new NativeArray<int2>(4, Allocator.TempJob);
             neighborOffsets[0] = new int2(0, 1);
@@ -62,43 +80,26 @@ public partial struct BakeGridSystem : ISystem
             }
             // Schedule jobs
             var costFieldHandle = new GenerateCostFieldJob{
-                World = collisionWorld, CostField = tempCostFieldBuffer, ObstacleCountMap = tempObstacleBuffer, Width = width, Height = height
+                World = collisionWorld, CostField = costFieldArr, ObstacleCountMap = obstacleCountArr, Width = width, Height = height
             }.Schedule(gridSize, 20, state.Dependency);
             var integrationFieldHandle = new GenerateIntegrationField{
-                CostField = tempCostFieldBuffer, // Using the temp buffer here is faster since .AsNativeArray() returns a pointer
+                CostField = costFieldArr, // Using the temp buffer here is faster since .AsNativeArray() returns a pointer
                 Height = height,
                 Width = width,
-                IntegrationField = tempIntegrationBuffer,
+                IntegrationField = integrationFieldArr,
                 TargetCell = targetCell
             }.Schedule(costFieldHandle);
             var flowFieldHandle = new GenerateFlowFieldJob{
-                FlowField = tempFlowFieldBuffer,
+                FlowField = flowFieldArr,
                 Height = height,
                 Width = width,
-                IntegrationField = tempIntegrationBuffer,
+                IntegrationField = integrationFieldArr,
                 NeighborOffsets = neighborOffsets
             }.Schedule(gridSize, 20, integrationFieldHandle);
             flowFieldHandle.Complete();
             
             // Copy our temp buffer into their respective fields
-            DynamicBuffer<byte> costFieldBuffer = SystemAPI.GetSingletonBuffer<CostField>().Reinterpret<byte>();
-            DynamicBuffer<byte> obstacleMapBuffer = SystemAPI.GetSingletonBuffer<ObstacleCountMap>().Reinterpret<byte>();
-            DynamicBuffer<ushort> integrationFieldBuffer = SystemAPI.GetSingletonBuffer<IntegrationField>().Reinterpret<ushort>();
-            DynamicBuffer<FlowFieldDirection> flowField = SystemAPI.GetSingletonBuffer<FlowFieldDirection>(); // remove this later
-            DynamicBuffer<float2> flowFieldBuffer = SystemAPI.GetSingletonBuffer<FlowFieldDirection>().Reinterpret<float2>();
-            
-            // Copy the data
-            costFieldBuffer.CopyFrom(tempCostFieldBuffer);
-            integrationFieldBuffer.CopyFrom(tempIntegrationBuffer);
-            flowFieldBuffer.CopyFrom(tempFlowFieldBuffer);
-            obstacleMapBuffer.CopyFrom(tempObstacleBuffer);
-            
-            // Cleanup
-            tempIntegrationBuffer.Dispose();
-            tempCostFieldBuffer.Dispose();
-            tempFlowFieldBuffer.Dispose();
             neighborOffsets.Dispose();
-            tempObstacleBuffer.Dispose();
             
             // Remove the tag so we bake only once for now
             var ecbSingleton = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>();
@@ -108,9 +109,9 @@ public partial struct BakeGridSystem : ISystem
             // Just for debugging the cost field
             // Debug.Log("Performed cost bake");
             
-            for (int i = 0; i < costFieldBuffer.Length; i++)
+            for (int i = 0; i < costFieldArr.Length; i++)
             {
-                if (costFieldBuffer[i] == byte.MaxValue)
+                if (costFieldArr[i] == byte.MaxValue)
                 {
                     int x = i % width;
                     int y = i / width;
@@ -122,9 +123,9 @@ public partial struct BakeGridSystem : ISystem
             }
             
             // Debugging the flow field
-            for (int i = 0; i < flowField.Length; i++)
+            for (int i = 0; i < flowFieldArr.Length; i++)
             {
-                if (math.lengthsq(flowField[i].Direction) < 0.001f)
+                if (math.lengthsq(flowFieldArr[i]) < 0.001f)
                     continue;
 
                 int gridX = i % width;
@@ -132,7 +133,7 @@ public partial struct BakeGridSystem : ISystem
                 
                 float3 start = new float3(gridX - (width / 2), 1.0f, (gridY - (height / 2)));
                 
-                Debug.DrawRay(start, new float3(flowField[i].Direction.x, 0,  flowField[i].Direction.y), Color.aquamarine, 3f);
+                Debug.DrawRay(start, new float3(flowFieldArr[i].x, 0,  flowFieldArr[i].y), Color.aquamarine, 3f);
             }
         }
     }

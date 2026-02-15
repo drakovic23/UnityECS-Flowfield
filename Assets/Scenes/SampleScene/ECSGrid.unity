@@ -3727,6 +3727,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::FlowFieldAuthor
   GridWidth: 100
   GridHeight: 100
+  SeparationRadius: 0.5
+  SeparationWeight: 0.8
+  AlignmentWeight: 0.25
+  CohesionWeight: 0.5
+  LookAheadTime: 0.5
+  AvoidanceWeight: 0.5
 --- !u!4 &1300232034
 Transform:
   m_ObjectHideFlags: 0

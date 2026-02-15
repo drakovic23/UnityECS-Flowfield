@@ -31,6 +31,16 @@ public struct GridSettings : IComponentData
     public int TotalSize;
 }
 
+public struct MovementSettings : IComponentData
+{
+    public float SeparationRadius;
+    public float SeparationWeight;
+    public float AlignmentWeight;
+    public float CohesionWeight;
+    public float LookAheadTime;
+    public float AvoidanceWeight;
+}
+
 public struct FlowFieldDirection : IBufferElementData
 {
     public float2 Direction;

@@ -35,16 +35,13 @@ public partial struct MoveableEntitySystem : ISystem
     {
         // Used to stop the entity around the target
         if (!SystemAPI.TryGetSingleton(out PlayerTag playerTag))
-        {
-            // Debug.LogError("No player tag");
             return;
-        }
         
         if (!SystemAPI.TryGetSingleton(out GridSettings gridSettings))
-        {
-            // Debug.LogError("No flow field data");
             return;
-        }
+
+        if (!SystemAPI.TryGetSingleton(out MovementSettings movementSettings))
+            return;
         
         var flowFieldDirection = SystemAPI.GetSingletonBuffer<FlowFieldDirection>();
         var costField = SystemAPI.GetSingletonBuffer<CostField>();
@@ -76,12 +73,12 @@ public partial struct MoveableEntitySystem : ISystem
             CostField = costField.Reinterpret<byte>().AsNativeArray(),
             TransformLookup = localTransformLookup,
             VelocityLookup = velocityLookup,
-            SeparationRadius = 0.8f,
-            SeparationWeight = 0.8f,
-            AlignmentWeight = 0.25f,
-            CohesionWeight = 0.8f,
-            LookAheadTime = 0.5f,
-            AvoidanceWeight = 0.5f,
+            SeparationRadius = movementSettings.SeparationRadius,
+            SeparationWeight = movementSettings.SeparationWeight,
+            AlignmentWeight = movementSettings.AlignmentWeight,
+            CohesionWeight = movementSettings.CohesionWeight,
+            LookAheadTime = movementSettings.LookAheadTime,
+            AvoidanceWeight = movementSettings.AvoidanceWeight,
             OffsetX = gridSettings.OffsetX,
             OffsetY = gridSettings.OffsetY,
             DeltaTime = SystemAPI.Time.DeltaTime,

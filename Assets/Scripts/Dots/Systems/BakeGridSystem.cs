@@ -34,7 +34,6 @@ public partial struct BakeGridSystem : ISystem
         if (gridSize == 0) // error
             return;
         
-        // Let's assume we only bake when a bake tag exists
         foreach (var (tag, entity) in SystemAPI.Query<RefRO<PerformBakeTag>>().WithEntityAccess())
         {
             DynamicBuffer<byte> costFieldBuffer = SystemAPI.GetSingletonBuffer<CostField>().Reinterpret<byte>();
@@ -68,10 +67,8 @@ public partial struct BakeGridSystem : ISystem
             {
                 Debug.LogError("No player tag found");
             }
+            
             // Schedule jobs
-            // var costFieldHandle = new GenerateCostFieldJob{
-            //     World = collisionWorld, CostField = costFieldArr, ObstacleCountMap = obstacleCountArr, Width = width, Height = height
-            // }.Schedule(gridSize, 20, state.Dependency);
             var integrationFieldHandle = new GenerateIntegrationField{
                 CostField = costFieldArr,
                 Height = height,
@@ -88,29 +85,12 @@ public partial struct BakeGridSystem : ISystem
             }.Schedule(gridSize, 20, integrationFieldHandle);
             flowFieldHandle.Complete();
             
-            // Copy our temp buffer into their respective fields
             neighborOffsets.Dispose();
             
-            // Remove the tag so we bake only once for now
+            // Remove the tag
             var ecbSingleton = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>();
             var ecb = ecbSingleton.CreateCommandBuffer(state.WorldUnmanaged);
             ecb.RemoveComponent<PerformBakeTag>(entity);
-            
-            // Just for debugging the cost field
-            // Debug.Log("Performed cost bake");
-            //
-            // for (int i = 0; i < costFieldArr.Length; i++)
-            // {
-            //     if (costFieldArr[i] == byte.MaxValue)
-            //     {
-            //         int x = i % width;
-            //         int y = i / width;
-            //         int offsetX = width / 2;
-            //         int offsetY = width / 2;
-            //         
-            //         Debug.DrawLine(new Vector3(x - offsetX, 10, y - offsetY), new Vector3(x - offsetX, 0, y - offsetY), Color.red, 30f);
-            //     }
-            // }
             
             // Debugging the flow field
             for (int i = 0; i < flowFieldArr.Length; i++)

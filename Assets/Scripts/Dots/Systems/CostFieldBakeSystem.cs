@@ -49,6 +49,22 @@ public partial struct CostFieldBakeSystem : ISystem
         
         Entity readyEntity = ecb.CreateEntity();
         ecb.AddComponent(readyEntity, new CostFieldReadyTag());
+        
+        // Debugging the cost field
+        // Debug.Log("Performed cost bake");
+        //
+        // for (int i = 0; i < costFieldArr.Length; i++)
+        // {
+        //     if (costFieldArr[i] == byte.MaxValue)
+        //     {
+        //         int x = i % width;
+        //         int y = i / width;
+        //         int offsetX = width / 2;
+        //         int offsetY = width / 2;
+        //         
+        //         Debug.DrawLine(new Vector3(x - offsetX, 10, y - offsetY), new Vector3(x - offsetX, 0, y - offsetY), Color.red, 30f);
+        //     }
+        // }
     }
     
     public struct GenerateCostFieldJob : IJobParallelFor

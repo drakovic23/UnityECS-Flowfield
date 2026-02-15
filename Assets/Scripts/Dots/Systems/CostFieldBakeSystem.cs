@@ -21,9 +21,7 @@ public partial struct CostFieldBakeSystem : ISystem
     {
         // Debug.Log("Running cost field bake");
         var gridConfig = SystemAPI.GetSingleton<GridSettings>();
-        int gridSize = gridConfig.GridSize.x *  gridConfig.GridSize.y;
-        int width = gridConfig.GridSize.x;
-        int height = gridConfig.GridSize.y;
+        // int gridSize = gridConfig.GridSize.x *  gridConfig.GridSize.y;
         
         var performBake = SystemAPI.GetSingletonEntity<PerformBakeCostField>();
         var ecbSingleton = SystemAPI.GetSingleton<BeginSimulationEntityCommandBufferSystem.Singleton>();
@@ -41,8 +39,8 @@ public partial struct CostFieldBakeSystem : ISystem
         CollisionWorld collisionWorld = physicsWorld.CollisionWorld;
         
         var costFieldHandle = new GenerateCostFieldJob{
-            World = collisionWorld, CostField = costFieldArr, ObstacleCountMap = obstacleCountArr, Width = width, Height = height
-        }.Schedule(gridSize, 20, state.Dependency);
+            World = collisionWorld, CostField = costFieldArr, ObstacleCountMap = obstacleCountArr, Width = gridConfig.GridSize.x, Height = gridConfig.GridSize.y
+        }.Schedule(gridConfig.TotalSize, 20, state.Dependency);
 
         costFieldHandle.Complete();
         

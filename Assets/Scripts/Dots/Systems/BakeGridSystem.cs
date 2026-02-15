@@ -22,19 +22,14 @@ public partial struct BakeGridSystem : ISystem
 
         state.RequireForUpdate<CostFieldReadyTag>();
     }
-    const int LAYER_OBSTACLE = 7;
-
+    
     public void OnUpdate(ref SystemState state)
     {
         // Get our grid size and width
-        int gridSize = 0;
-        int width = 0;
-        int height = 0;
-
         var gridConfig = SystemAPI.GetSingleton<GridSettings>();
-        gridSize = gridConfig.GridSize.x *  gridConfig.GridSize.y;
-        width = gridConfig.GridSize.x;
-        height = gridConfig.GridSize.y;
+        int gridSize = gridConfig.TotalSize;
+        int width = gridConfig.GridSize.x;
+        int height = gridConfig.GridSize.y;
 
         if (gridSize == 0) // error
             return;
@@ -132,53 +127,6 @@ public partial struct BakeGridSystem : ISystem
             }
         }
     }
-    public struct GenerateCostFieldJob : IJobParallelFor
-    {
-        [ReadOnly] public CollisionWorld World;
-        [WriteOnly] public NativeArray<byte> CostField;
-        [WriteOnly] public NativeArray<byte> ObstacleCountMap;
-        public int Width;
-        public int Height;
-        public void Execute(int index)
-        {
-            int x = index % Width;
-            int y = index / Height;
-            uint obstacleMask = (1u << LAYER_OBSTACLE);
-
-            var collisionFilter = new CollisionFilter{
-                BelongsTo = ~0u, CollidesWith = obstacleMask, GroupIndex = 0
-            };
-            
-            // Get the center position of the cell
-            // float3 center = new float3(x + 0.5f, 0, y + 0.5f);
-            int offsetX = Width / 2;
-            int offsetY = Height / 2;
-            float3 center = new float3(x - offsetX, 0.1f, y - offsetY);
-
-            NativeList<DistanceHit> hits = new NativeList<DistanceHit>(Allocator.Temp);
-            hits.Resize(5, NativeArrayOptions.ClearMemory);
-            
-            // To see where the sphere is hitting at
-            // Debug.DrawLine(new float3(center.x, 10f, center.y), center, Color.blue, 25f);
-            
-            if(World.OverlapSphere(center, 0.45f, ref hits, collisionFilter, QueryInteraction.Default))
-            {
-                // if (x - offsetX == -2 && y - offsetY == 0) 
-                // {
-                //     float3 hitPoint = hits[0].Position;
-                //     // Debug.Log($"Query At: {center} | Hit Surface At: {hitPoint} | Distance: {math.distance(center, hitPoint)}");
-                // }
-                CostField[index] = byte.MaxValue;
-                ObstacleCountMap[index] = (byte) hits.Length;
-            }
-            else
-            {
-                CostField[index] = 1;
-            }
-
-            hits.Dispose();
-        }
-    }
     
     public struct GenerateIntegrationField : IJob
     {
@@ -268,7 +216,7 @@ public partial struct BakeGridSystem : ISystem
             ushort downCost = (currentY > 0) ? IntegrationField[index - Width] : ushort.MaxValue;
             ushort upCost = (currentY < Height - 1) ? IntegrationField[index + Width] : ushort.MaxValue;
 
-            // Calculate the slope/gradient
+            // Calculate the slope/gradient so we get diagonals
             float xDir = leftCost - rightCost;
             float yDir = downCost - upCost;
             

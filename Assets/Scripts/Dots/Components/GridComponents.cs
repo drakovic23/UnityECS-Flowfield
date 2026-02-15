@@ -26,6 +26,9 @@ public struct PlayerTag : IComponentData
 public struct GridSettings : IComponentData
 {
     public int2 GridSize;
+    public int OffsetX;
+    public int OffsetY;
+    public int TotalSize;
 }
 
 public struct FlowFieldDirection : IBufferElementData

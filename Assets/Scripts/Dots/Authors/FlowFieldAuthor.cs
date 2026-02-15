@@ -15,7 +15,10 @@ public class FlowFieldAuthor : MonoBehaviour
             Entity entity = GetEntity(TransformUsageFlags.None);
             
             AddComponent(entity, new GridSettings{
-                GridSize = new int2(authoring.GridWidth, authoring.GridHeight)
+                GridSize = new int2(authoring.GridWidth, authoring.GridHeight),
+                OffsetX = authoring.GridWidth / 2,
+                OffsetY = authoring.GridHeight / 2,
+                TotalSize = authoring.GridWidth * authoring.GridHeight
             });
             
             int gridSize = authoring.GridWidth * authoring.GridHeight;

@@ -7,8 +7,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Transforms;
-using UnityEngine;
-using UnityEngine.UIElements;
+
 [BurstCompile]
 public partial struct MoveableEntitySystem : ISystem
 {
@@ -20,6 +19,8 @@ public partial struct MoveableEntitySystem : ISystem
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<GridSettings>();
+        state.RequireForUpdate<CostField>();
+
         _spatialMap = new NativeParallelMultiHashMap<int, Entity>(1000,  Allocator.Persistent);
         _moveablesQuery = SystemAPI.QueryBuilder().WithAll<MoveableEntity, PhysicsVelocity, LocalTransform>().Build();
         _moveablesQueryNoVelocity = SystemAPI.QueryBuilder().WithAll<MoveableEntity, LocalTransform>().Build();
@@ -32,11 +33,6 @@ public partial struct MoveableEntitySystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        int width = 0;
-        int height = 0;
-        int offsetX = 0;
-        int offsetY = 0;
-        
         // Used to stop the entity around the target
         if (!SystemAPI.TryGetSingleton(out PlayerTag playerTag))
         {
@@ -44,7 +40,7 @@ public partial struct MoveableEntitySystem : ISystem
             return;
         }
         
-        if (!SystemAPI.TryGetSingleton(out GridSettings flowFieldData))
+        if (!SystemAPI.TryGetSingleton(out GridSettings gridSettings))
         {
             // Debug.LogError("No flow field data");
             return;
@@ -52,10 +48,6 @@ public partial struct MoveableEntitySystem : ISystem
         
         var flowFieldDirection = SystemAPI.GetSingletonBuffer<FlowFieldDirection>();
         var costField = SystemAPI.GetSingletonBuffer<CostField>();
-        width = flowFieldData.GridSize.x;
-        height = flowFieldData.GridSize.y;
-        offsetX = width / 2;
-        offsetY = height / 2;
         
         // Clear the map and schedule jobs
         // It's possible that the other threads haven't yet completed
@@ -65,11 +57,11 @@ public partial struct MoveableEntitySystem : ISystem
         }.Schedule(state.Dependency);
 
         var populateSpatialHandle = new PopulateSpatialMapUpdateJob{
-            Height = height,
-            Width = width,
+            Height = gridSettings.GridSize.y,
+            Width = gridSettings.GridSize.x,
             SpatialMap = _spatialMap.AsParallelWriter(),
-            OffsetX = offsetX,
-            OffsetY = offsetY,
+            OffsetX = gridSettings.OffsetX,
+            OffsetY = gridSettings.OffsetY,
         }.ScheduleParallel(_moveablesQueryNoVelocity, clearSpatialHandle);
         populateSpatialHandle.Complete();
         
@@ -77,8 +69,8 @@ public partial struct MoveableEntitySystem : ISystem
         ComponentLookup<LocalTransform> localTransformLookup = SystemAPI.GetComponentLookup<LocalTransform>(true);
         ComponentLookup<PhysicsVelocity> velocityLookup = SystemAPI.GetComponentLookup<PhysicsVelocity>(true);
         var readSpatialHandle = new ReadSpatialMapUpdateJob{
-            Height = height,
-            Width = width,
+            Height = gridSettings.GridSize.y,
+            Width = gridSettings.GridSize.x,
             SpatialMap = _spatialMap,
             FlowFieldDirection = flowFieldDirection.Reinterpret<float2>().AsNativeArray(),
             CostField = costField.Reinterpret<byte>().AsNativeArray(),
@@ -90,8 +82,8 @@ public partial struct MoveableEntitySystem : ISystem
             CohesionWeight = 0.8f,
             LookAheadTime = 0.5f,
             AvoidanceWeight = 0.5f,
-            OffsetX = offsetX,
-            OffsetY = offsetY,
+            OffsetX = gridSettings.OffsetX,
+            OffsetY = gridSettings.OffsetY,
             DeltaTime = SystemAPI.Time.DeltaTime,
         }.ScheduleParallel(_moveablesQuery, populateSpatialHandle);
         state.Dependency = readSpatialHandle;

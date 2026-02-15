@@ -14,7 +14,7 @@ public class FlowFieldAuthor : MonoBehaviour
         {
             Entity entity = GetEntity(TransformUsageFlags.None);
             
-            AddComponent(entity, new FlowFieldData{
+            AddComponent(entity, new GridSettings{
                 GridSize = new int2(authoring.GridWidth, authoring.GridHeight)
             });
             
@@ -31,7 +31,8 @@ public class FlowFieldAuthor : MonoBehaviour
             
             var obstacleCountBuffer = AddBuffer<ObstacleCountMap>(entity);
             obstacleCountBuffer.Resize(gridSize, NativeArrayOptions.ClearMemory);
-            
+
+            AddComponent(entity, new PerformBakeCostField());
             // For the initial bake
             AddComponent(entity, new PerformBakeTag());
         }

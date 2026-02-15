@@ -15,11 +15,11 @@ public partial struct MoveableEntitySystem : ISystem
     NativeParallelMultiHashMap<int, Entity> _spatialMap;
     EntityQuery _moveablesQuery;
     EntityQuery _moveablesQueryNoVelocity;
-    FlowFieldData _flowFieldData;
+    GridSettings _gridSettings;
     [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
-        state.RequireForUpdate<FlowFieldData>();
+        state.RequireForUpdate<GridSettings>();
         _spatialMap = new NativeParallelMultiHashMap<int, Entity>(1000,  Allocator.Persistent);
         _moveablesQuery = SystemAPI.QueryBuilder().WithAll<MoveableEntity, PhysicsVelocity, LocalTransform>().Build();
         _moveablesQueryNoVelocity = SystemAPI.QueryBuilder().WithAll<MoveableEntity, LocalTransform>().Build();
@@ -44,7 +44,7 @@ public partial struct MoveableEntitySystem : ISystem
             return;
         }
         
-        if (!SystemAPI.TryGetSingleton(out FlowFieldData flowFieldData))
+        if (!SystemAPI.TryGetSingleton(out GridSettings flowFieldData))
         {
             // Debug.LogError("No flow field data");
             return;

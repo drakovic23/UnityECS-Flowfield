@@ -11,12 +11,12 @@ namespace Dots.Systems
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<BeginSimulationEntityCommandBufferSystem.Singleton>();
-            state.RequireForUpdate<FlowFieldData>();
+            state.RequireForUpdate<GridSettings>();
         }
 
         public void OnUpdate(ref SystemState state)
         {
-            if (!SystemAPI.TryGetSingleton(out FlowFieldData flowFieldData))
+            if (!SystemAPI.TryGetSingleton(out GridSettings flowFieldData))
             {
                 Debug.LogError("No flow field data");
                 return;

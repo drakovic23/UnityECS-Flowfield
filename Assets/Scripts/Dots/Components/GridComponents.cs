@@ -23,7 +23,7 @@ public struct PlayerTag : IComponentData
     public float3 Position;
 }
 
-public struct FlowFieldData : IComponentData
+public struct GridSettings : IComponentData
 {
     public int2 GridSize;
 }
@@ -37,6 +37,8 @@ public struct CostField : IBufferElementData
 {
     public byte MovementCost;
 }
+public struct PerformBakeCostField : IComponentData{}
+public struct CostFieldReadyTag : IComponentData{}
 
 public struct ObstacleTag : IComponentData { } // Acts as a "heartbeat" for the obstacle, can add other fields like health here
 public struct ObstacleCleanup : ICleanupComponentData // This is passed when an entity is destroyed

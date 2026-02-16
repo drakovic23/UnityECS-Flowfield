@@ -1,6 +1,7 @@
 using Unity.Entities;
 using UnityEngine;
 
+// Not currently used - should be removed
 public class TargetAuthor : MonoBehaviour
 {
     class TargetBaker : Baker<TargetAuthor>

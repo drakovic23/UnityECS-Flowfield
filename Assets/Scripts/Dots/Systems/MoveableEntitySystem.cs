@@ -7,8 +7,9 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Transforms;
+using UnityEngine;
 
-[BurstCompile]
+// [BurstCompile]
 public partial struct MoveableEntitySystem : ISystem
 {
     NativeParallelMultiHashMap<int, Entity> _spatialMap;
@@ -25,12 +26,12 @@ public partial struct MoveableEntitySystem : ISystem
         _moveablesQuery = SystemAPI.QueryBuilder().WithAll<MoveableEntity, PhysicsVelocity, LocalTransform>().Build();
         _moveablesQueryNoVelocity = SystemAPI.QueryBuilder().WithAll<MoveableEntity, LocalTransform>().Build();
     }
-    [BurstCompile]
+    // [BurstCompile]
     public void OnDestroy(ref SystemState state)
     {
         _spatialMap.Dispose();
     }
-    [BurstCompile]
+    // [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
         // Used to stop the entity around the target
@@ -60,7 +61,7 @@ public partial struct MoveableEntitySystem : ISystem
             OffsetX = gridSettings.OffsetX,
             OffsetY = gridSettings.OffsetY,
         }.ScheduleParallel(_moveablesQueryNoVelocity, clearSpatialHandle);
-        populateSpatialHandle.Complete();
+        // populateSpatialHandle.Complete();
         
         // This will move the entities
         ComponentLookup<LocalTransform> localTransformLookup = SystemAPI.GetComponentLookup<LocalTransform>(true);
@@ -85,7 +86,7 @@ public partial struct MoveableEntitySystem : ISystem
         }.ScheduleParallel(_moveablesQuery, populateSpatialHandle);
         state.Dependency = readSpatialHandle;
     }
-    [BurstCompile]
+    // [BurstCompile]
     public partial struct PopulateSpatialMapUpdateJob : IJobEntity
     {
         public NativeParallelMultiHashMap<int, Entity>.ParallelWriter SpatialMap;
@@ -105,10 +106,11 @@ public partial struct MoveableEntitySystem : ISystem
             SpatialMap.Add(cellindex, entity);
         }
     }
-    [BurstCompile]
+    // [BurstCompile]
     public partial struct ReadSpatialMapUpdateJob : IJobEntity
     {
         [ReadOnly] public NativeParallelMultiHashMap<int, Entity> SpatialMap;
+        [NativeDisableContainerSafetyRestriction]
         [ReadOnly] public ComponentLookup<LocalTransform> TransformLookup;
         [NativeDisableContainerSafetyRestriction] // Since we are performing a lookup and modifying a component of the same type as a ref this tag is needed
         [ReadOnly] public ComponentLookup<PhysicsVelocity> VelocityLookup;
@@ -125,7 +127,8 @@ public partial struct MoveableEntitySystem : ISystem
         public int OffsetX;
         public int OffsetY;
         public float DeltaTime;
-        public void Execute(Entity entity, ref PhysicsVelocity velocity, in LocalTransform transform)
+        const float FLOWFIELD_WEIGHT = 3f;
+        public void Execute(Entity entity, ref PhysicsVelocity velocity, ref LocalTransform transform)
         {
             int posX = (int)math.round(transform.Position.x) + OffsetX;
             int posY = (int)math.round(transform.Position.z) + OffsetY;
@@ -192,7 +195,7 @@ public partial struct MoveableEntitySystem : ISystem
             
             // Movement logic
             float MaxSpeed = 1f;
-            float TurnSpeed = 2f;
+            float TurnSpeed = 20f;
             
             // Find our future position and apply a force away from any obstacles
             float3 futurePosition = transform.Position + (velocity.Linear * LookAheadTime);
@@ -215,24 +218,24 @@ public partial struct MoveableEntitySystem : ISystem
             float3 alignmentDirection = math.normalizesafe(new float3(averageVelocity.x, 0, averageVelocity.z));
             float3 centerOfMass =  math.normalizesafe(new float3(averagePosition.x, 0, averagePosition.z) - transform.Position);
             float3 flowFieldDirection = new float3(FlowFieldDirection[currentCell].x, 0 , FlowFieldDirection[currentCell].y);
-            float3 targetDirection = math.normalizesafe(flowFieldDirection + (separationForce * SeparationWeight) + 
+            float3 targetDirection = math.normalizesafe((flowFieldDirection * FLOWFIELD_WEIGHT) + (separationForce * SeparationWeight) + 
                                                         (alignmentDirection *  AlignmentWeight) + (centerOfMass * CohesionWeight) + (avoidanceForce * AvoidanceWeight));
             
             
             targetDirection *= MaxSpeed;
             // velocity.Linear = new float3(targetDirection.x, velocity.Linear.y, targetDirection.z);
             velocity.Linear = math.lerp(velocity.Linear, new float3(targetDirection.x, velocity.Linear.y, targetDirection.z), TurnSpeed * DeltaTime);
-            // Are we moving faster than we should?
-            if(math.lengthsq(targetDirection) > math.square(MaxSpeed))
+            
+            Debug.DrawLine(transform.Position, transform.Position + (flowFieldDirection * 5f), Color.black, 5f);
+            if (math.lengthsq(velocity.Linear) > 0.01f)
             {
-                // Flatten the vectors to keep our vertical gravity
-                float3 horizontalVelocityScaled = math.normalizesafe(new float3(targetDirection.x, 0, targetDirection.y)) * MaxSpeed;
-                float3 newVelocity = new float3(horizontalVelocityScaled.x, velocity.Linear.y, horizontalVelocityScaled.z);
-                velocity.Linear = velocity.Linear = math.lerp(velocity.Linear, newVelocity, TurnSpeed * DeltaTime);
+                Debug.Log("Adjusting rotation");
+                quaternion targetRotation = quaternion.LookRotation(new float3(targetDirection.x, 0, targetDirection.z), math.up());
+                transform.Rotation = targetRotation;
             }
         }
     }
-    [BurstCompile]
+    // [BurstCompile]
     public struct ClearSpatialMap : IJob
     {
         public NativeParallelMultiHashMap<int, Entity> SpatialMap;

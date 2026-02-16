@@ -8,12 +8,12 @@ public class FlowFieldAuthor : MonoBehaviour
     public int GridWidth;
     public int GridHeight;
     [Header("Boids Settings")]
-    public float SeparationRadius = 0.8f;
-    public float SeparationWeight = 0.8f;
-    public float AlignmentWeight = 0.25f;
-    public float CohesionWeight = 0.8f;
-    public float LookAheadTime = 0.5f;
-    public float AvoidanceWeight = 0.5f;
+    [Range(0,5)] public float SeparationRadius = 1.5f;
+    [Range(0,5)] public float SeparationWeight = 0.25f;
+    [Range(0,5)] public float AlignmentWeight = 0.8f;
+    [Range(0,5)] public float CohesionWeight = 0.2f;
+    [Range(0,5)] public float LookAheadTime = 0.5f;
+    [Range(0,5)] public float AvoidanceWeight = 0.5f;
     class FlowFieldBaker : Baker<FlowFieldAuthor>
     {
         public override void Bake(FlowFieldAuthor authoring)
@@ -51,8 +51,14 @@ public class FlowFieldAuthor : MonoBehaviour
             });
             
             // For the initial bake
-            AddComponent(entity, new PerformBakeCostField());
+            AddComponent(entity, new PerformCostFieldBake());
             AddComponent(entity, new PerformBakeTag());
+            
+            #if UNITY_EDITOR
+                Debug.Log($"Baked grid with {authoring.GridWidth *  authoring.GridHeight} total cells");
+                Debug.Log($"OffsetX: {authoring.GridWidth / 2}");
+                Debug.Log($"OffsetY: {authoring.GridHeight / 2}");
+            #endif
         }
     }
 }

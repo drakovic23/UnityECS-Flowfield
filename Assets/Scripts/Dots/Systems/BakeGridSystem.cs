@@ -1,4 +1,5 @@
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -59,7 +60,8 @@ public partial struct BakeGridSystem : ISystem
             int2 targetCell = new int2(width / 2, height / 2); // Default to 0, 0
             if (SystemAPI.TryGetSingleton(out PlayerTag playerTag))
             {
-                targetCell = new int2(Mathf.RoundToInt(playerTag.Position.x), Mathf.RoundToInt(playerTag.Position.z));
+                targetCell.x = (int)math.round(playerTag.Position.x);
+                targetCell.y = (int)math.round(playerTag.Position.z);
                 targetCell.x += (width / 2);
                 targetCell.y += (height / 2);
             }
@@ -95,15 +97,27 @@ public partial struct BakeGridSystem : ISystem
             // Debugging the flow field
             for (int i = 0; i < flowFieldArr.Length; i++)
             {
-                if (math.lengthsq(flowFieldArr[i]) < 0.001f)
+                if (math.lengthsq(flowFieldArr[i]) < 0.0001f)
                     continue;
 
                 int gridX = i % width;
                 int gridY = i / height;
                 
-                float3 start = new float3(gridX - (width / 2), 1.0f, (gridY - (height / 2)));
+                float3 cellCenter = new float3(
+                gridX - gridConfig.OffsetX, 
+                0.2f,
+                gridY - gridConfig.OffsetY
+                );
                 
-                Debug.DrawRay(start, new float3(flowFieldArr[i].x, 0,  flowFieldArr[i].y), Color.aquamarine, 3f);
+                float3 direction = new float3(flowFieldArr[i].x, 0, flowFieldArr[i].y);
+                float3 start = cellCenter - (direction * 0.5f);
+
+                if (integrationFieldArr[i] == byte.MaxValue)
+                {
+                    Debug.DrawRay(start, direction, Color.purple, 3f);
+                    continue;
+                }
+                Debug.DrawRay(start, direction, Color.aquamarine, 3f);
             }
         }
     }
@@ -111,7 +125,6 @@ public partial struct BakeGridSystem : ISystem
     public struct GenerateIntegrationField : IJob
     {
         [ReadOnly] public NativeArray<byte> CostField;
-        
         public NativeArray<ushort> IntegrationField;
         public int2 TargetCell;
         public int Width;
@@ -123,6 +136,7 @@ public partial struct BakeGridSystem : ISystem
             {
                 IntegrationField[i] = ushort.MaxValue;
             }
+            // UnsafeUtility.MemSet(IntegrationField.GetUnsafePtr(), 0xFF, IntegrationField.Length * sizeof(ushort));
             
             // Set our target cell to value 0
             int targetIndex = TargetCell.y * Width + TargetCell.x;
@@ -148,7 +162,7 @@ public partial struct BakeGridSystem : ISystem
                 for (int i = 0; i < 4; i++)
                 {
                     int2 neighbor = new int2(currentX, currentY) + neighborOffsets[i];
-                    // Since our grid is centered around 0,0 we need to check if we are checking neighbors at an edge
+                    // Check if we are checking neighbors at an edge
                     if (neighbor.x < 0 || neighbor.x > Width - 1 || neighbor.y < 0 || neighbor.y > Height - 1)
                         continue;
                     
@@ -186,15 +200,25 @@ public partial struct BakeGridSystem : ISystem
         
         public void Execute(int index)
         {
-            
             int currentX = index % Width, currentY = index / Width;
             
+            ushort currentCost = IntegrationField[index];
+
+            if (currentCost == ushort.MaxValue)
+            {
+                FlowField[index] = float2.zero;
+                return;
+            }
             // We have to check if we are at the edges of our grid.
             // If we are given coord we have to flatten it so we check currentX against index - 1 (for left) and index + 1 (for right) neighbors.
             ushort leftCost = (currentX > 0) ? IntegrationField[index - 1] : ushort.MaxValue;
+            if (leftCost == ushort.MaxValue) leftCost = currentCost;
             ushort rightCost = (currentX < Width - 1) ? IntegrationField[index + 1] : ushort.MaxValue;
+            if (rightCost == ushort.MaxValue) rightCost = currentCost;
             ushort downCost = (currentY > 0) ? IntegrationField[index - Width] : ushort.MaxValue;
+            if (downCost == ushort.MaxValue) downCost = currentCost;
             ushort upCost = (currentY < Height - 1) ? IntegrationField[index + Width] : ushort.MaxValue;
+            if (upCost == ushort.MaxValue) upCost = currentCost;
 
             // Calculate the slope/gradient so we get diagonals
             float xDir = leftCost - rightCost;
@@ -202,29 +226,14 @@ public partial struct BakeGridSystem : ISystem
             
             float2 direction = new float2(xDir, yDir);
 
-            // Since we can get a large vector here, normalize
-            FlowField[index] = math.normalizesafe(direction);
-
-            // This method will always choose the Z axis over the X axis due to the way we check neighbors
-            // Thus we have no gradients, unless an obstacle is in the way
-            // int currentCost = IntegrationField[index];
-            // ushort bestCost = (ushort)currentCost;
-            // float2 bestDirection = float2.zero;
-            // for (int i = 0; i < 4; i++)
-            // {
-            //     int2 currentNeighbor = new int2(currentX, currentY) + NeighborOffsets[i];
-            //     if (currentNeighbor.x < 0 || currentNeighbor.x > Width - 1 || currentNeighbor.y < 0 || currentNeighbor.y > Height - 1)
-            //         continue;
-            //
-            //     int neighborCell = currentNeighbor.y * Width + currentNeighbor.x;
-            //     if (IntegrationField[neighborCell] < bestCost)
-            //     {
-            //         bestCost = IntegrationField[neighborCell];
-            //         bestDirection = NeighborOffsets[i];
-            //     }
-            // }
-
-            // FlowField[index] = bestDirection;
+            if (math.lengthsq(direction) < 0.001f)
+            {
+                FlowField[index] = float2.zero;
+            }
+            else
+            {
+                FlowField[index] = math.normalizesafe(direction);
+            }
         }
     }
 }

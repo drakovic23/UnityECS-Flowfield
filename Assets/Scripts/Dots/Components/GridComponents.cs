@@ -50,7 +50,7 @@ public struct CostField : IBufferElementData
 {
     public byte MovementCost;
 }
-public struct PerformBakeCostField : IComponentData{}
+public struct PerformCostFieldBake : IComponentData{}
 public struct CostFieldReadyTag : IComponentData{}
 
 public struct ObstacleTag : IComponentData { } // Acts as a "heartbeat" for the obstacle, can add other fields like health here

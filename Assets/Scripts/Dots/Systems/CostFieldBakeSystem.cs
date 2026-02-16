@@ -4,6 +4,7 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Physics;
+using UnityEngine;
 
 public partial struct CostFieldBakeSystem : ISystem
 {
@@ -15,15 +16,13 @@ public partial struct CostFieldBakeSystem : ISystem
         state.RequireForUpdate<PhysicsWorldSingleton>();
         state.RequireForUpdate<CostField>();
         state.RequireForUpdate<ObstacleCountMap>();
-        state.RequireForUpdate<PerformBakeCostField>();
+        state.RequireForUpdate<PerformCostFieldBake>();
     }
     public void OnUpdate(ref SystemState state)
     {
-        // Debug.Log("Running cost field bake");
         var gridConfig = SystemAPI.GetSingleton<GridSettings>();
-        // int gridSize = gridConfig.GridSize.x *  gridConfig.GridSize.y;
         
-        var performBake = SystemAPI.GetSingletonEntity<PerformBakeCostField>();
+        var performBake = SystemAPI.GetSingletonEntity<PerformCostFieldBake>();
         var ecbSingleton = SystemAPI.GetSingleton<BeginSimulationEntityCommandBufferSystem.Singleton>();
         var ecb = ecbSingleton.CreateCommandBuffer(state.WorldUnmanaged);
         
@@ -45,26 +44,26 @@ public partial struct CostFieldBakeSystem : ISystem
         costFieldHandle.Complete();
         
         // Let the other baker system know the cost field is ready
-        ecb.RemoveComponent<PerformBakeCostField>(performBake);
+        ecb.RemoveComponent<PerformCostFieldBake>(performBake);
         
         Entity readyEntity = ecb.CreateEntity();
         ecb.AddComponent(readyEntity, new CostFieldReadyTag());
         
         // Debugging the cost field
-        // Debug.Log("Performed cost bake");
-        //
-        // for (int i = 0; i < costFieldArr.Length; i++)
-        // {
-        //     if (costFieldArr[i] == byte.MaxValue)
-        //     {
-        //         int x = i % width;
-        //         int y = i / width;
-        //         int offsetX = width / 2;
-        //         int offsetY = width / 2;
-        //         
-        //         Debug.DrawLine(new Vector3(x - offsetX, 10, y - offsetY), new Vector3(x - offsetX, 0, y - offsetY), Color.red, 30f);
-        //     }
-        // }
+        Debug.Log("Performed cost bake");
+        
+        for (int i = 0; i < costFieldArr.Length; i++)
+        {
+            if (costFieldArr[i] == byte.MaxValue)
+            {
+                int x = i % gridConfig.GridSize.x;
+                int y = i / gridConfig.GridSize.x;
+                int offsetX = gridConfig.GridSize.x / 2;
+                int offsetY = gridConfig.GridSize.y / 2;
+                
+                Debug.DrawLine(new Vector3(x - offsetX, 10, y - offsetY), new Vector3(x - offsetX, 0, y - offsetY), Color.red, 30f);
+            }
+        }
     }
     
     public struct GenerateCostFieldJob : IJobParallelFor
@@ -77,7 +76,7 @@ public partial struct CostFieldBakeSystem : ISystem
         public void Execute(int index)
         {
             int x = index % Width;
-            int y = index / Height;
+            int y = index / Width;
             uint obstacleMask = (1u << LAYER_OBSTACLE);
 
             var collisionFilter = new CollisionFilter{
@@ -88,14 +87,13 @@ public partial struct CostFieldBakeSystem : ISystem
             // float3 center = new float3(x + 0.5f, 0, y + 0.5f);
             int offsetX = Width / 2;
             int offsetY = Height / 2;
-            float3 center = new float3(x - offsetX, 0.1f, y - offsetY);
+            float3 center = new float3(x - offsetX, 0.45f, y - offsetY);
 
-            NativeList<DistanceHit> hits = new NativeList<DistanceHit>(Allocator.Temp);
-            hits.Resize(5, NativeArrayOptions.ClearMemory);
+            NativeList<DistanceHit> hits = new NativeList<DistanceHit>( 5,Allocator.Temp);
             
-            // To see where the sphere is hitting at
-            // Debug.DrawLine(new float3(center.x, 10f, center.y), center, Color.blue, 25f);
+            // hits.Resize(5, NativeArrayOptions.ClearMemory);
             
+            // This is pretty expensive, it may be better to use CheckSphere()
             if(World.OverlapSphere(center, 0.45f, ref hits, collisionFilter, QueryInteraction.Default))
             {
                 // if (x - offsetX == -2 && y - offsetY == 0) 
